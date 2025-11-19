@@ -1,71 +1,115 @@
+import React, { useEffect, useMemo, useState } from 'react'
+import Header from './components/Header'
+import SummaryCards from './components/SummaryCards'
+import IOSField from './components/IOSField'
+import ReceiptForm from './components/ReceiptForm'
+import AdvanceForm from './components/AdvanceForm'
+import ListSection from './components/ListSection'
+
+const API = import.meta.env.VITE_BACKEND_URL || ''
+
+const monthLabel = (d) => d.toLocaleString('default', { month: 'long', year: 'numeric' })
+
+function useMonth() {
+  const [cursor, setCursor] = useState(() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), 1)
+  })
+  const label = useMemo(() => monthLabel(cursor), [cursor])
+  const param = useMemo(() => `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,'0')}`,[cursor])
+  return {
+    label,
+    param,
+    prev: () => setCursor(new Date(cursor.getFullYear(), cursor.getMonth()-1, 1)),
+    next: () => setCursor(new Date(cursor.getFullYear(), cursor.getMonth()+1, 1))
+  }
+}
+
+async function api(path, opts={}) {
+  const res = await fetch(`${API}${path}`, { headers: { 'Content-Type': 'application/json' }, ...opts })
+  if (!res.ok) throw new Error('Request failed')
+  return res.headers.get('content-type')?.includes('text/csv') ? res.text() : res.json()
+}
+
 function App() {
+  const { label, param, prev, next } = useMonth()
+  const [summary, setSummary] = useState(null)
+  const [receipts, setReceipts] = useState([])
+  const [advances, setAdvances] = useState([])
+
+  const refresh = async () => {
+    const [s, r, a] = await Promise.all([
+      api(`/api/summary?month=${param}`),
+      api(`/api/receipts?month=${param}`),
+      api(`/api/advances?month=${param}`),
+    ])
+    setSummary(s)
+    setReceipts(r)
+    setAdvances(a)
+  }
+
+  useEffect(() => {
+    refresh()
+  }, [param])
+
+  const addReceipt = async (payload) => {
+    await api('/api/receipt', { method: 'POST', body: JSON.stringify(payload) })
+    refresh()
+  }
+
+  const addAdvance = async (payload) => {
+    await api('/api/advance', { method: 'POST', body: JSON.stringify(payload) })
+    refresh()
+  }
+
+  const exportCsv = async () => {
+    const csv = await api(`/api/export.csv?month=${param}`)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `meals-${param}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const receiptRows = receipts.map(r => ({
+    left: `${r.date} · ${r.meal_type === 'lunch' ? 'Lunch' : 'Dinner'}${r.merchant ? ' · ' + r.merchant : ''}`,
+    right: `$${Number(r.amount).toFixed(2)}`,
+    sub: r.note || ''
+  }))
+
+  const advanceRows = advances.map(a => ({
+    left: `${a.date}`,
+    right: `$${Number(a.amount).toFixed(2)}`,
+    sub: a.note || ''
+  }))
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Subtle pattern overlay */}
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(59,130,246,0.05),transparent_50%)]"></div>
+    <div className="min-h-screen bg-[radial-gradient(1200px_800px_at_50%_-100px,rgba(168,85,247,0.2),transparent)] bg-neutral-950 text-white">
+      <Header monthLabel={label} onPrev={prev} onNext={next} />
 
-      <div className="relative min-h-screen flex items-center justify-center p-8">
-        <div className="max-w-2xl w-full">
-          {/* Header with Flames icon */}
-          <div className="text-center mb-12">
-            <div className="inline-flex items-center justify-center mb-6">
-              <img
-                src="/flame-icon.svg"
-                alt="Flames"
-                className="w-24 h-24 drop-shadow-[0_0_25px_rgba(59,130,246,0.5)]"
-              />
-            </div>
+      <SummaryCards summary={summary} />
 
-            <h1 className="text-5xl font-bold text-white mb-4 tracking-tight">
-              Flames Blue
-            </h1>
+      <div className="mt-4">
+        <IOSField label="Add Receipt">
+          <ReceiptForm onSubmit={addReceipt} />
+        </IOSField>
 
-            <p className="text-xl text-blue-200 mb-6">
-              Build applications through conversation
-            </p>
-          </div>
-
-          {/* Instructions */}
-          <div className="bg-slate-800/50 backdrop-blur-sm border border-blue-500/20 rounded-2xl p-8 shadow-xl mb-6">
-            <div className="flex items-start gap-4 mb-6">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-500 text-white rounded-lg flex items-center justify-center font-bold">
-                1
-              </div>
-              <div>
-                <h3 className="font-semibold text-white mb-1">Describe your idea</h3>
-                <p className="text-blue-200/80 text-sm">Use the chat panel on the left to tell the AI what you want to build</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4 mb-6">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-500 text-white rounded-lg flex items-center justify-center font-bold">
-                2
-              </div>
-              <div>
-                <h3 className="font-semibold text-white mb-1">Watch it build</h3>
-                <p className="text-blue-200/80 text-sm">Your app will appear in this preview as the AI generates the code</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4">
-              <div className="flex-shrink-0 w-8 h-8 bg-blue-500 text-white rounded-lg flex items-center justify-center font-bold">
-                3
-              </div>
-              <div>
-                <h3 className="font-semibold text-white mb-1">Refine and iterate</h3>
-                <p className="text-blue-200/80 text-sm">Continue the conversation to add features and make changes</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Footer */}
-          <div className="text-center">
-            <p className="text-sm text-blue-300/60">
-              No coding required • Just describe what you want
-            </p>
-          </div>
-        </div>
+        <IOSField label="Record Advance">
+          <AdvanceForm onSubmit={addAdvance} />
+        </IOSField>
       </div>
+
+      <div className="px-4 max-w-xl mx-auto mt-4 flex justify-between items-center">
+        <div className="text-xs text-white/60">History</div>
+        <button onClick={exportCsv} className="px-3 py-1.5 rounded-xl bg-white/5 border border-white/10 text-white/90 active:scale-95">Export CSV</button>
+      </div>
+
+      <ListSection title="Receipts" items={receiptRows} emptyText="No receipts this month" />
+      <ListSection title="Advances" items={advanceRows} emptyText="No advances this month" />
+
+      <div className="h-16" />
     </div>
   )
 }
